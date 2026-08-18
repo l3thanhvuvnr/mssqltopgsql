@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moodle-mssql2pg"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+  "click>=8.1",
+  "pyyaml>=6.0",
+]
+
+# DB drivers are only needed at migration time (in Docker), not for unit tests.
+# adapters.py imports them lazily, so the whole test suite runs without them.
+[project.optional-dependencies]
+drivers = [
+  "pymssql>=2.2",
+  "psycopg2-binary>=2.9",
+]
+
+[project.scripts]
+moodle-mssql2pg = "moodle_mssql2pg.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,13 @@
+# Thong tin ket noi that — KHONG BAO GIO commit
+config.yml
+
+# Ket qua chay: file .load chua mat khau trong connection string, log, report
+output/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+dist/

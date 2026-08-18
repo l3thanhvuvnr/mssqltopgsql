@@ -1,0 +1,8 @@
+services:
+  migrator:
+    build: .
+    # Truy cập IP nội bộ (172.100.100.x) — bật host network trên Linux nếu cần:
+    # network_mode: host
+    volumes:
+      - ./config.yml:/app/config.yml:ro
+      - ./output:/app/output

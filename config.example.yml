@@ -1,0 +1,32 @@
+# Chuyen LMS_PTSC: SQL Server 2019 -> PostgreSQL 18 (container ptsc-pg18)
+
+source_mssql:
+  host: 202.143.111.14
+  port: 2968
+  db: LMS_PTSC
+  user: your_mssql_user
+  password: "your_mssql_password"   # NGUYEN BAN, khong percent-encode
+  schema: dbo
+
+target_pgsql:
+  host: db                  # ten service trong compose network (KHONG dung localhost:5518)
+  port: 5432
+  db: lms_ptsc
+  user: moodle
+  password: "moodle"
+  schema: public
+
+options:
+  table_prefix: mdl_
+  batch_size: 30
+  large_table_threshold: 5000000
+  work_mem: "256MB"
+  maintenance_work_mem: "1GB"
+  drop_target_tables: false
+  include_tables: []
+
+  # DB chi 1.4 GB, bang lon nhat 431K dong -> copy DAY DU, khong loai tru gi.
+  exclude_data_tables: []
+
+  moodle_codebase_path: null
+  php_bin: php

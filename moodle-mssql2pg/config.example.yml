@@ -1,0 +1,61 @@
+# Cấu hình chuyển đổi database Moodle từ SQL Server sang PostgreSQL.
+# Copy file này thành `config.yml` rồi điền thông tin 2 connection.
+#   cp config.example.yml config.yml
+# Mật khẩu có ký tự đặc biệt (+, (, ...) cứ điền bình thường — tool tự URL-encode.
+# Có thể đặt mật khẩu qua biến môi trường MSSQL_PASSWORD / PGSQL_PASSWORD.
+
+source_mssql:
+  host: 172.100.100.200
+  port: 5968                 # port không chuẩn cũng được — tool tự set TDSPORT
+  db: LMS_INS_TEST
+  user: vnr
+  password: "Pw+(Example123"
+  schema: dbo
+
+target_pgsql:
+  host: 172.100.100.13
+  port: 5432
+  db: ins_test_13
+  user: admin
+  password: "changeme_pg"
+  schema: public
+
+options:
+  table_prefix: mdl_
+  batch_size: 30
+  large_table_threshold: 5000000     # số dòng để tách bảng riêng ra file .load
+  work_mem: "1GB"
+  maintenance_work_mem: "2GB"
+  drop_target_tables: false          # true = xóa bảng đích trước khi tạo (include drop)
+  include_tables: []                 # rỗng = tự phát hiện tất cả bảng mdl_*
+
+  # Bảng loại trừ DATA: vẫn TẠO BẢNG RỖNG (giữ cấu trúc + index) nhưng KHÔNG copy dữ liệu.
+  # => Moodle vẫn thấy đủ bảng nên KHÔNG lỗi "thiếu bảng"; chỉ bỏ phần data lớn/không cần.
+  exclude_data_tables:
+    - mdl_logstore_standard_log      # log hoạt động (rất lớn)
+    - mdl_log                        # log legacy (rất lớn)
+    - mdl_log_queries                # log câu query
+    - mdl_task_log                   # log scheduled task
+    - mdl_sessions                   # phiên đăng nhập (user chỉ cần login lại)
+    - mdl_cache_flags                # cache (tự sinh lại)
+    - mdl_cache_filters              # cache filter (tự sinh lại)
+    - mdl_context_temp               # bảng tạm rebuild context
+    - mdl_editor_atto_autosave       # autosave nháp (transient)
+    - mdl_tiny_autosave              # autosave nháp (transient)
+    - mdl_lock_db                    # lock tạm (nên rỗng)
+    - mdl_events_queue               # hàng đợi event (transient)
+    - mdl_events_queue_handlers      # hàng đợi event (transient)
+    - mdl_tag_correlation            # cache tag (tự sinh lại)
+    - mdl_file_conversion            # chuyển đổi file tạm
+    - mdl_infected_files             # log cách ly virus
+    - mdl_portfolio_tempdata         # dữ liệu tạm
+    - mdl_hvp_tmpfiles               # file tạm H5P/HVP
+    - mdl_search_index_requests      # hàng đợi reindex search
+  # (TÙY CHỌN — thêm vào danh sách trên nếu muốn nhẹ hơn, CHẤP NHẬN mất dữ liệu lịch sử):
+  #   - mdl_stats_daily / _weekly / _monthly / _user_daily / _user_weekly / _user_monthly
+  #   - mdl_grade_grades_history / _items_history / _categories_history / _outcomes_history / mdl_scale_history
+  #   - mdl_config_log, mdl_backup_logs, mdl_backup_controllers, mdl_task_adhoc
+  #   - mdl_search_simpledb_index
+
+  moodle_codebase_path: null         # ví dụ /var/www/moodle → bật verify schema chuẩn Moodle
+  php_bin: php

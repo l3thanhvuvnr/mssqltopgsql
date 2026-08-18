@@ -1,0 +1,50 @@
+# LMS_PTSC: SQL Server 2019 -> PostgreSQL 18
+#   db       : container PostgreSQL 18 chua du lieu sau khi chuyen
+#   migrator : tool moodle-mssql2pg (pgloader + python), chay 1 lan roi thoat
+name: ptsc-pg18
+
+services:
+  db:
+    image: postgres:18
+    container_name: ptsc-pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: lms_ptsc
+      POSTGRES_USER: moodle
+      POSTGRES_PASSWORD: moodle
+    # max_locks_per_transaction phai tang: pgloader tao 728 bang trong it transaction
+    command:
+      - postgres
+      - -c
+      - max_locks_per_transaction=512
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - maintenance_work_mem=1GB
+      - -c
+      - max_wal_size=4GB
+    ports:
+      - "5518:5432"
+    volumes:
+      # postgres:18 khai bao volume tai /var/lib/postgresql (KHONG phai /data nhu pg<=17)
+      - pg18data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moodle -d lms_ptsc"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  migrator:
+    build: ./moodle-mssql2pg
+    image: moodle-mssql2pg:local
+    environment:
+      TDSVER: "7.4"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./config.yml:/app/config.yml:ro
+      - ./output:/app/output
+
+volumes:
+  pg18data:

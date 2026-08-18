@@ -28,7 +28,8 @@ PGC="${PG_CONTAINER:-ptsc-pg18}"
 ms() { docker run --rm mcr.microsoft.com/mssql-tools:latest /opt/mssql-tools/bin/sqlcmd \
          -S "$SRC_HOST,$SRC_PORT" -U "$SRC_USER" -P "$SRC_PW" -d "$SRC_DB" \
          -l 60 -h -1 -W -Q "SET NOCOUNT ON; $1" 2>/dev/null | tr -d ' \r' | head -1; }
-pg() { docker exec "$PGC" psql -U "$DST_USER" -d "$DST_DB" -tAc "$1" 2>&1 | tr -d ' '; }
+# Chi cat khoang trang hai dau, KHONG xoa khoang trang ben trong (vd "304 MB").
+pg() { docker exec "$PGC" psql -U "$DST_USER" -d "$DST_DB" -tAc "$1" 2>&1 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
 
 echo "=== 1. So bang ==="
 echo "MSSQL=$(ms "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE' AND TABLE_NAME LIKE 'mdl!_%' ESCAPE '!';")  PG=$(pg "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';")"

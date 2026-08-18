@@ -23,10 +23,12 @@ docker exec -it ptsc-pg18 psql -U moodle -d lms_ptsc # tu trong container
 
 ```
 .
+├── Makefile                # giao diện chính — chạy `make` để xem danh sách lệnh
 ├── docker-compose.yml      # container PostgreSQL 18 (db) + tool migrate (migrator)
 ├── config.example.yml      # mẫu cấu hình — copy thành config.yml rồi điền
 ├── verify_deep.sh          # kiểm chứng độc lập sau khi migrate
 ├── moodle-mssql2pg/        # tool: discover → generate → migrate → fix → verify → report
+│   └── Makefile            # lệnh phát triển tool (test, build, install)
 └── docs/superpowers/       # spec và plan thiết kế của tool
 ```
 
@@ -36,25 +38,39 @@ docker exec -it ptsc-pg18 psql -U moodle -d lms_ptsc # tu trong container
 ## Chạy lần đầu
 
 ```bash
-cp config.example.yml config.yml     # roi dien host/user/password that
-docker compose up -d db              # bat PostgreSQL 18
-docker compose build migrator        # build tool
-docker compose run --rm migrator test    # kiem tra 2 ket noi
-docker compose run --rm migrator run     # chay that
-bash verify_deep.sh                      # kiem chung doc lap
+make config     # tao config.yml tu mau — mo ra dien host/user/password that
+make all        # build -> test-conn -> migrate -> verify
 ```
+
+Chạy `make` không tham số để xem toàn bộ lệnh. Các lệnh hay dùng:
+
+| Lệnh | Việc |
+|---|---|
+| `make config` | Tạo `config.yml` từ mẫu |
+| `make up` / `make down` | Bật / dừng container PostgreSQL 18 |
+| `make test-conn` | Kiểm tra kết nối tới cả hai database |
+| `make dry-run` | Sinh file `.load` để xem trước, không nạp dữ liệu |
+| `make migrate` | Chạy migration đầy đủ |
+| `make verify` | Đếm chính xác `COUNT(*)` cả hai phía |
+| `make report` | Tóm tắt `output/report.md` |
+| `make errors` | Tìm lỗi trong log pgloader |
+| `make psql` | Mở `psql` vào database đích |
+| `make test` | Chạy test suite của tool |
+| `make clean` | Xoá `output/` |
+| `make reset` | Xoá database đích + `output/` để chạy lại từ đầu — hỏi xác nhận |
+| `make destroy` | Xoá container và volume — **mất toàn bộ dữ liệu**, hỏi xác nhận |
+
+`reset` và `destroy` hỏi xác nhận trước khi xoá. Muốn bỏ qua khi viết script:
+`make reset FORCE=1`.
 
 > Mật khẩu trong `config.yml` điền **nguyên bản**, không percent-encode, và không
 > được chứa `@` hoặc `/` — pgloader không biểu diễn được hai ký tự này (xem lỗi 2 bên dưới).
 
-## Chạy lại
-
-Chạy lại từ đầu (xoá sạch dữ liệu đích):
+## Chạy lại từ đầu
 
 ```bash
-docker exec ptsc-pg18 psql -U moodle -d postgres \
-  -c "DROP DATABASE IF EXISTS lms_ptsc WITH (FORCE);" -c "CREATE DATABASE lms_ptsc OWNER moodle;"
-rm -f output/*.load output/*.log output/migrate_state.json output/discovered.json output/report.md
+make reset      # xoa database dich + output/
+make migrate
 ```
 
 > **Quan trọng**: phải xoá `output/migrate_state.json`. Tool dùng file này để resume và

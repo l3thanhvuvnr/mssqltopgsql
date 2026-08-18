@@ -11,3 +11,6 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+
+# File dump — dung luong lon, chua toan bo du lieu
+backup/

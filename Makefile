@@ -12,9 +12,15 @@ cfg = $(shell awk '/^$(2):/{f=1;next} /^[a-zA-Z]/{f=0} f&&/^[[:space:]]+$(1):/{p
 PG_DB   = $(or $(call cfg,db,target_pgsql),lms_ptsc)
 PG_USER = $(or $(call cfg,user,target_pgsql),moodle)
 
+DUMP_DIR  ?= backup
+DUMP_NAME ?= $(PG_DB)
+
+# Dem CHINH XAC so dong tung bang (khong dung reltuples vi do chi la uoc luong).
+COUNT_SQL = SELECT table_name||' '||(xpath('/row/c/text()', query_to_xml('SELECT count(*) AS c FROM public.'||quote_ident(table_name), false, true, '')))[1]::text FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name;
+
 .DEFAULT_GOAL := help
 .PHONY: help config check-config build up down ps test-conn dry-run migrate \
-        verify report errors psql test clean reset destroy all
+        verify report errors psql dump dump-verify test clean reset destroy all
 
 help: ## Hien thi danh sach lenh
 	@echo "LMS_PTSC: SQL Server 2019 -> PostgreSQL 18"
@@ -101,6 +107,50 @@ errors: ## Tim loi trong log pgloader
 psql: ## Mo psql vao database dich
 	docker exec -it $(PG_CONTAINER) psql -U $(PG_USER) -d $(PG_DB)
 
+dump: ## Xuat file .sql ra backup/ de restore len server khac
+	@mkdir -p $(DUMP_DIR)
+	@echo "Dang dump '$(PG_DB)' tu container $(PG_CONTAINER)..."
+	@docker exec $(PG_CONTAINER) pg_dump -U $(PG_USER) -d $(PG_DB) \
+	  --no-owner --no-privileges --encoding=UTF8 > $(DUMP_DIR)/$(DUMP_NAME).sql
+	@tail -5 $(DUMP_DIR)/$(DUMP_NAME).sql | grep -q "dump complete" \
+	  || { echo "LOI: dump khong hoan tat — file co the bi cat."; exit 1; }
+	@# Ban tuong thich: bo \restrict/\unrestrict (psql cu khong hieu) va
+	@# SET transaction_timeout (tham so chi co tu PostgreSQL 17).
+	@sed -e '/^\\restrict /d' -e '/^\\unrestrict /d' \
+	     -e '/^SET transaction_timeout = 0;$$/d' \
+	     $(DUMP_DIR)/$(DUMP_NAME).sql > $(DUMP_DIR)/$(DUMP_NAME)-pg13-17.sql
+	@gzip -kf $(DUMP_DIR)/$(DUMP_NAME).sql $(DUMP_DIR)/$(DUMP_NAME)-pg13-17.sql
+	@echo ""
+	@ls -lh $(DUMP_DIR)/$(DUMP_NAME)*.sql $(DUMP_DIR)/$(DUMP_NAME)*.gz \
+	  | awk '{printf "  %-46s %s\n",$$9,$$5}'
+	@echo ""
+	@echo "  server PostgreSQL 18 tro len  ->  $(DUMP_NAME).sql"
+	@echo "  server PostgreSQL 13..17      ->  $(DUMP_NAME)-pg13-17.sql"
+	@echo "  Kiem chung file dump          ->  make dump-verify"
+
+dump-verify: ## Restore file dump vao DB tam, doi chieu so dong roi xoa DB tam
+	@[ -f $(DUMP_DIR)/$(DUMP_NAME).sql ] || \
+	  { echo "Chua co $(DUMP_DIR)/$(DUMP_NAME).sql — chay 'make dump' truoc."; exit 1; }
+	@echo "Tao database tam $(PG_DB)_verify va restore..."
+	@docker exec -e PGOPTIONS=-cclient_min_messages=warning $(PG_CONTAINER) \
+	  psql -U $(PG_USER) -d postgres -q \
+	  -c "DROP DATABASE IF EXISTS $(PG_DB)_verify WITH (FORCE);" \
+	  -c "CREATE DATABASE $(PG_DB)_verify OWNER $(PG_USER);"
+	@docker exec -i $(PG_CONTAINER) psql -U $(PG_USER) -d $(PG_DB)_verify \
+	  -v ON_ERROR_STOP=1 -q -o /dev/null < $(DUMP_DIR)/$(DUMP_NAME).sql
+	@docker exec $(PG_CONTAINER) psql -U $(PG_USER) -d $(PG_DB) -tAc "$(COUNT_SQL)" > /tmp/.cnt_src
+	@docker exec $(PG_CONTAINER) psql -U $(PG_USER) -d $(PG_DB)_verify -tAc "$(COUNT_SQL)" > /tmp/.cnt_dst
+	@if diff -q /tmp/.cnt_src /tmp/.cnt_dst >/dev/null; then \
+	  echo "OK — $$(wc -l < /tmp/.cnt_src) bang khop chinh xac tung dong."; \
+	else \
+	  echo "LECH — cac bang sau khac nhau:"; diff /tmp/.cnt_src /tmp/.cnt_dst | head -20; \
+	fi
+	@docker exec -e PGOPTIONS=-cclient_min_messages=warning $(PG_CONTAINER) \
+	  psql -U $(PG_USER) -d postgres -q \
+	  -c "DROP DATABASE IF EXISTS $(PG_DB)_verify WITH (FORCE);"
+	@rm -f /tmp/.cnt_src /tmp/.cnt_dst
+	@echo "Da xoa database tam."
+
 test: ## Chay test suite cua tool
 	@$(MAKE) --no-print-directory -C moodle-mssql2pg test
 
@@ -114,7 +164,8 @@ reset: ## Xoa database dich + output/ de chay lai tu dau  [HOI XAC NHAN]
 	  printf "Se XOA toan bo database '$(PG_DB)' va thu muc output/. Go 'yes' de tiep tuc: "; \
 	  read ans; [ "$$ans" = "yes" ] || { echo "Da huy — khong co gi bi xoa."; exit 1; }; \
 	fi; \
-	docker exec $(PG_CONTAINER) psql -U $(PG_USER) -d postgres -q \
+	docker exec -e PGOPTIONS=-cclient_min_messages=warning $(PG_CONTAINER) \
+	  psql -U $(PG_USER) -d postgres -q \
 	  -c "DROP DATABASE IF EXISTS $(PG_DB) WITH (FORCE);" \
 	  -c "CREATE DATABASE $(PG_DB) OWNER $(PG_USER);"
 	@$(MAKE) --no-print-directory clean

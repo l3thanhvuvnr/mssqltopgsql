@@ -24,6 +24,7 @@ docker exec -it ptsc-pg18 psql -U moodle -d lms_ptsc # tu trong container
 ```
 .
 ├── Makefile                # giao diện chính — chạy `make` để xem danh sách lệnh
+├── RESTORE.md              # hướng dẫn restore file .sql lên server PostgreSQL khác
 ├── docker-compose.yml      # container PostgreSQL 18 (db) + tool migrate (migrator)
 ├── config.example.yml      # mẫu cấu hình — copy thành config.yml rồi điền
 ├── verify_deep.sh          # kiểm chứng độc lập sau khi migrate
@@ -55,6 +56,8 @@ Chạy `make` không tham số để xem toàn bộ lệnh. Các lệnh hay dùn
 | `make report` | Tóm tắt `output/report.md` |
 | `make errors` | Tìm lỗi trong log pgloader |
 | `make psql` | Mở `psql` vào database đích |
+| `make dump` | Xuất file `.sql` ra `backup/` để restore lên server khác |
+| `make dump-verify` | Restore lại file dump vào DB tạm để đối chiếu số dòng |
 | `make test` | Chạy test suite của tool |
 | `make clean` | Xoá `output/` |
 | `make reset` | Xoá database đích + `output/` để chạy lại từ đầu — hỏi xác nhận |
@@ -94,6 +97,26 @@ make migrate
    Để mặc định thì pgloader chết với `INVALID-UTF8-CONTINUATION-BYTE`, và nếu không
    chết thì tiếng Việt cũng hỏng.
    → `moodle-mssql2pg/Dockerfile` ép `client charset = UTF-8` và `tds version = 7.4`.
+
+## Xuất file .sql để restore lên server khác
+
+```bash
+make dump          # tao backup/lms_ptsc.sql + ban tuong thich + ban .gz
+make dump-verify   # restore lai vao DB tam de doi chieu so dong, roi xoa
+```
+
+Sinh ra hai bản, dữ liệu giống hệt nhau, chỉ khác vài dòng lệnh ở đầu file:
+
+| Server đích | File |
+|---|---|
+| PostgreSQL 18 trở lên | `backup/lms_ptsc.sql` |
+| PostgreSQL 13 → 17 | `backup/lms_ptsc-pg13-17.sql` |
+
+Bản `pg13-17` bỏ `\restrict`/`\unrestrict` (lệnh của `psql` mới) và
+`SET transaction_timeout` (tham số chỉ có từ PostgreSQL 17) — hai thứ làm server
+cũ báo lỗi. Mỗi bản 175 MB, nén `.gz` còn 15 MB.
+
+Các bước restore chi tiết: xem **[RESTORE.md](RESTORE.md)**.
 
 ## Lưu ý khi đọc `output/report.md`
 

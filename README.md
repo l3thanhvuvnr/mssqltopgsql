@@ -28,6 +28,8 @@ docker exec -it ptsc-pg18 psql -U moodle -d lms_ptsc # tu trong container
 ├── docker-compose.yml      # container PostgreSQL 18 (db) + tool migrate (migrator)
 ├── config.example.yml      # mẫu cấu hình — copy thành config.yml rồi điền
 ├── verify_deep.sh          # kiểm chứng độc lập sau khi migrate
+├── check_moodle_schema.sh  # chạy check_database_schema.php của Moodle lên DB đích
+├── fix_moodle_indexes.sh   # (tuỳ chọn) tạo các index Moodle mong đợi mà nguồn thiếu
 ├── moodle-mssql2pg/        # tool: discover → generate → migrate → fix → verify → report
 │   └── Makefile            # lệnh phát triển tool (test, build, install)
 └── docs/superpowers/       # spec và plan thiết kế của tool
@@ -79,7 +81,36 @@ make migrate
 > **Quan trọng**: phải xoá `output/migrate_state.json`. Tool dùng file này để resume và
 > sẽ **bỏ qua** các batch đã đánh dấu xong, kể cả khi batch đó thực ra đã thất bại.
 
-## Ba lỗi đã phải sửa để chạy được
+## Ba lỗi pgloader làm hỏng schema (Moodle không chạy được)
+
+pgloader **bỏ typemod** khi tạo bảng, và PostgreSQL **cắt tên identifier ở 63 ký tự**.
+Cả ba hậu quả dưới đây đều được vá trong bước `fix` của tool.
+
+1. **`nvarchar(100)` → `text`** (1143 cột / 465 bảng). Moodle đọc metadata cột:
+   `text` → meta_type `X` (clob), và `moodle_database->where_clause()` từ chối **mọi**
+   điều kiện so sánh bằng trên cột đó. Site chết ngay khi khởi động:
+
+   ```
+   Comparisons of text column conditions are not allowed.
+   Please use sql_compare_text() in your query.
+   Error code: textconditionsnotallowed
+     line 204 of /lib/classes/plugin_manager.php: call to moodle_database->get_records()
+   ```
+
+   → `fix` chạy `ALTER COLUMN ... TYPE varchar(n)` theo đúng độ dài bên MSSQL.
+
+2. **`decimal(10,5)` → `numeric` không precision** (121 cột, gồm các cột điểm như
+   `mdl_grade_grades.finalgrade`). Moodle báo `size is (-1,65531), expected (10,5)`.
+   → cùng cơ chế, `ALTER COLUMN ... TYPE numeric(p,s)`.
+
+3. **Mất một UNIQUE index.** `mdl_enrol_lti_lti2_share_key` có 2 unique index; pgloader
+   đặt tên `idx_<oid>_<tên-gốc>` dài giống nhau ở đầu, PostgreSQL cắt còn 63 ký tự thành
+   **trùng tên** → lỗi `42P07 relation already exists`, chỉ tạo được 1. Mất ràng buộc
+   unique trên cột `sharekey`.
+   → `fix` đối chiếu index hai phía theo `(bảng, cột, unique)` — không theo tên vì
+   pgloader đổi tên — rồi tạo bù với tên rút gọn kèm hậu tố băm.
+
+## Ba lỗi môi trường đã phải sửa để chạy được
 
 1. **Base image không dùng được.** `dimitri/pgloader:latest` là Debian 11 (Python 3.9)
    trong khi tool yêu cầu Python ≥ 3.10, và apt keyring của nó đã hỏng.
@@ -117,6 +148,51 @@ Bản `pg13-17` bỏ `\restrict`/`\unrestrict` (lệnh của `psql` mới) và
 cũ báo lỗi. Mỗi bản 175 MB, nén `.gz` còn 15 MB.
 
 Các bước restore chi tiết: xem **[RESTORE.md](RESTORE.md)**.
+
+## Kiểm chứng
+
+```bash
+make verify              # doi chieu 2 phia: so dong, kieu cot, index, sequence
+./check_moodle_schema.sh # chay check_database_schema.php cua chinh Moodle
+```
+
+`make verify` so **từng cột** giữa MSSQL và PostgreSQL (tên, kiểu, độ dài, NOT NULL).
+Kết quả hiện tại: **6532/6547 cột khớp tuyệt đối**. 15 cột khác biệt đều nằm ở bảng
+tuỳ biến và đều là chuẩn hoá có lợi, không phải mất mát:
+
+- 5 cột tên chữ hoa (`Contextid`, `createdAt`, `updatedAt`) bị hạ về chữ thường.
+  PostgreSQL luôn hạ identifier không đóng ngoặc kép, và Moodle luôn dùng chữ thường.
+  Lưu ý: nếu plugin tuỳ biến của bạn có SQL thô viết `"createdAt"` trong ngoặc kép thì
+  phải sửa thành `createdat`.
+- 10 cột `id` kiểu `integer` thành `bigint` (pgloader mở rộng cột identity). Moodle vốn
+  định nghĩa `id` là bigint nên đây là hướng đúng.
+
+### Về các sai lệch mà `check_database_schema.php` còn báo
+
+Còn khoảng 1408 dòng, **không phải do migration**:
+
+| Loại | Số lượng | Vì sao |
+|---|---:|---|
+| `Missing index` | 1092 | **Nguồn MSSQL vốn đã thiếu.** Nguồn chỉ có 140 index ngoài primary key, Moodle 4.4 mong đợi hơn 1200. Ví dụ `mdl_course` bên MSSQL chỉ có mỗi primary key. Bản sao có đúng 140 = bằng nguồn. |
+| `has default` / `NOT NULL` | 158 | Cột tuỳ biến của nguồn lệch so với XMLDB. Đối chiếu NOT NULL hai phía khớp 100%. |
+| `table/column is not expected` | 61 | Bảng và cột tuỳ biến do đội phát triển thêm vào. |
+| `incorrect type`, `length`, `size` | ~97 | Kiểu ở nguồn lệch chuẩn Moodle, ví dụ `fraction` là `decimal(12,7)` trong khi Moodle mong `(10,7)`. |
+
+Muốn tạo bù các index thiếu (làm database đích **tốt hơn** nguồn — đúng chuẩn XMLDB,
+truy vấn nhanh hơn nhiều):
+
+```bash
+./fix_moodle_indexes.sh --dry-run   # xem truoc 1093 lenh CREATE INDEX
+./fix_moodle_indexes.sh             # chay that
+```
+
+Đây là **tuỳ chọn**, không chạy tự động, vì nó thay đổi database vượt ra ngoài phạm vi
+một bản sao trung thực. Các lệnh do chính `check_database_schema.php` sinh ra.
+
+> Không chạy được `check_database_schema.php` trên MSSQL nguồn để so sánh: driver
+> `sqlsrv` của Moodle không hỗ trợ kiểu `numeric` (chỉ `decimal`) và ném
+> `error/invalidsqlsrvnativetype`. Nguồn có 3 cột `numeric` — thêm một dấu hiệu nữa cho
+> thấy database MSSQL này không do Moodle tạo ra.
 
 ## Lưu ý khi đọc `output/report.md`
 

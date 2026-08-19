@@ -96,13 +96,25 @@ report: ## Tom tat output/report.md
 	  || echo "  (khong co)"
 
 errors: ## Tim loi trong log pgloader
-	@if ls output/*.load.log >/dev/null 2>&1; then \
-	  if grep -lE "ERROR|KABOOM" output/*.load.log 2>/dev/null; then \
-	    echo "^^^ cac file tren co loi. Xem chi tiet: less <ten-file>"; \
-	  else \
-	    echo "Khong co loi trong $$(ls output/*.load.log | wc -l) log pgloader."; \
-	  fi; \
-	else echo "Chua co log — chay 'make migrate' truoc."; fi
+	@if ! ls output/*.load.log >/dev/null 2>&1; then \
+	  echo "Chua co log — chay 'make migrate' truoc."; exit 0; fi; \
+	known=$$(grep -hE "ERROR" output/*.load.log 2>/dev/null | grep -c "42P07" || true); \
+	other=$$(grep -hE "ERROR|KABOOM" output/*.load.log 2>/dev/null | grep -vc "42P07" || true); \
+	total=$$(ls output/*.load.log | wc -l); \
+	if [ "$$other" -gt 0 ]; then \
+	  echo "CO $$other LOI THAT trong $$total log:"; \
+	  grep -lE "ERROR|KABOOM" output/*.load.log | head; \
+	  echo "Xem chi tiet: less <ten-file>"; \
+	else \
+	  echo "Khong co loi that trong $$total log pgloader."; \
+	fi; \
+	if [ "$$known" -gt 0 ]; then \
+	  echo ""; \
+	  echo "($$known canh bao 42P07 'relation already exists' — pgloader dat ten index"; \
+	  echo " kieu idx_<oid>_<ten-goc> roi PostgreSQL cat con 63 ky tu nen hai index"; \
+	  echo " cat ra trung ten. Buoc fix da tao bu; 'make verify' doi chieu so index"; \
+	  echo " hai phia de xac nhan.)"; \
+	fi
 
 psql: ## Mo psql vao database dich
 	docker exec -it $(PG_CONTAINER) psql -U $(PG_USER) -d $(PG_DB)

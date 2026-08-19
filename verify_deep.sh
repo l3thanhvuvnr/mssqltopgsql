@@ -66,5 +66,55 @@ for tb in mdl_user mdl_course mdl_files mdl_context; do
   echo "  $(pg "SELECT '$tb: max_id='||COALESCE((SELECT max(id) FROM $tb),0)||' seq_last='||(SELECT last_value FROM ${tb}_id_seq);")"
 done
 
-echo "=== 6. Kich thuoc DB dich ==="
+echo "=== 6. Doi chieu KIEU DU LIEU tung cot giua 2 phia ==="
+# Chieu kieu MSSQL sang kieu PostgreSQL mong doi, roi so voi thuc te ben dich.
+# Day la bang chung truc tiep ve do trung thuc cua migration.
+# Truyen SQL qua FILE (-i) thay vi -Q: chuoi nhieu dong qua -Q khong on dinh.
+cat > /tmp/.cols_src.sql <<'SQL'
+SET NOCOUNT ON;
+SELECT TABLE_NAME+'|'+COLUMN_NAME+'|'+
+  CASE
+    WHEN DATA_TYPE IN ('bigint') THEN 'bigint'
+    WHEN DATA_TYPE IN ('int') THEN 'integer'
+    WHEN DATA_TYPE IN ('smallint','tinyint','bit') THEN 'smallint'
+    WHEN DATA_TYPE IN ('decimal','numeric') THEN 'numeric('+CAST(NUMERIC_PRECISION AS VARCHAR)+','+CAST(ISNULL(NUMERIC_SCALE,0) AS VARCHAR)+')'
+    WHEN DATA_TYPE IN ('float') THEN 'double precision'
+    WHEN DATA_TYPE IN ('real') THEN 'real'
+    WHEN DATA_TYPE IN ('nvarchar','varchar','nchar','char') AND CHARACTER_MAXIMUM_LENGTH > 0
+         THEN 'character varying('+CAST(CHARACTER_MAXIMUM_LENGTH AS VARCHAR)+')'
+    WHEN DATA_TYPE IN ('nvarchar','varchar','text','ntext','uniqueidentifier','xml') THEN 'text'
+    WHEN DATA_TYPE IN ('varbinary','image','binary') THEN 'bytea'
+    WHEN DATA_TYPE IN ('datetime','datetime2','smalldatetime') THEN 'timestamp without time zone'
+    ELSE '?'+DATA_TYPE
+  END
++'|'+IS_NULLABLE
+FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME LIKE 'mdl!_%' ESCAPE '!'
+ORDER BY TABLE_NAME, COLUMN_NAME;
+SQL
+
+docker run --rm -v /tmp/.cols_src.sql:/q.sql mcr.microsoft.com/mssql-tools:latest \
+  /opt/mssql-tools/bin/sqlcmd -S "$SRC_HOST,$SRC_PORT" -U "$SRC_USER" -P "$SRC_PW" \
+  -d "$SRC_DB" -l 60 -h -1 -W -i /q.sql 2>/dev/null \
+  | tr -d ' \r' | grep '|' | sort > /tmp/.cols_src
+
+pg "SELECT table_name||'|'||column_name||'|'||
+      CASE WHEN data_type='character varying' THEN 'character varying('||character_maximum_length||')'
+           WHEN data_type='numeric' AND numeric_precision IS NOT NULL
+                THEN 'numeric('||numeric_precision||','||numeric_scale||')'
+           ELSE data_type END
+      ||'|'||is_nullable
+    FROM information_schema.columns WHERE table_schema='public'
+    ORDER BY table_name, column_name;" | tr -d ' ' | grep '|' | sort > /tmp/.cols_dst
+
+echo "cot ben MSSQL : $(wc -l < /tmp/.cols_src)"
+echo "cot ben PG    : $(wc -l < /tmp/.cols_dst)"
+if diff -q /tmp/.cols_src /tmp/.cols_dst >/dev/null; then
+  echo "KHOP HOAN TOAN — moi cot dung kieu, do dai va NOT NULL."
+else
+  echo "Cac cot lech (nguon < / dich >):"
+  diff /tmp/.cols_src /tmp/.cols_dst | grep -E '^[<>]' | head -25
+  echo "  tong so dong lech: $(diff /tmp/.cols_src /tmp/.cols_dst | grep -cE '^[<>]')"
+fi
+
+echo "=== 7. Kich thuoc DB dich ==="
 echo "$(pg "SELECT pg_size_pretty(pg_database_size('$DST_DB'));")"

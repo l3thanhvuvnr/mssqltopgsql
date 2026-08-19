@@ -6,6 +6,8 @@ from moodle_mssql2pg.discover import (
     SQL_CHAR_COLUMNS,
     SQL_ROW_COUNTS,
     SQL_TABLES,
+    SQL_SOURCE_INDEXES,
+    SQL_TYPED_COLUMNS,
 )
 
 
@@ -27,6 +29,12 @@ class PymssqlClient:
 
     def fetch_char_columns(self, prefix: str) -> list[tuple[str, str]]:
         return [(r[0], r[1]) for r in self._rows(SQL_CHAR_COLUMNS, f"{prefix}%")]
+
+    def fetch_typed_columns(self, prefix: str) -> list[tuple]:
+        return [tuple(r) for r in self._rows(SQL_TYPED_COLUMNS, f"{prefix}%")]
+
+    def fetch_source_indexes(self, prefix: str) -> list[tuple]:
+        return [tuple(r) for r in self._rows(SQL_SOURCE_INDEXES, f"{prefix}%")]
 
     def fetch_row_counts(self, prefix: str) -> dict[str, int]:
         return {r[0]: int(r[1]) for r in self._rows(SQL_ROW_COUNTS, f"{prefix}%")}

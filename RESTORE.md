@@ -83,7 +83,28 @@ WHERE table_schema='public' AND constraint_type='FOREIGN KEY';
 -- Phai ra 0 — Moodle yeu cau smallint chu khong phai boolean
 SELECT count(*) FROM information_schema.columns
 WHERE table_schema='public' AND data_type='boolean';
+
+-- Phai ra 1143 varchar(n) va 0 cot varchar khong gioi han do dai.
+-- Neu ra 0 varchar(n) la dump cu (truoc ban va typemod) -> Moodle se chet voi
+-- loi "textconditionsnotallowed" ngay khi khoi dong.
+SELECT count(*) FROM information_schema.columns
+WHERE table_schema='public' AND data_type='character varying';
+
+-- Phai ra 121 — cot numeric deu co precision. Neu ra 0 thi cot diem so bi mat
+-- precision, Moodle bao 'size is (-1,65531), expected (10,5)'.
+SELECT count(*) FROM information_schema.columns
+WHERE table_schema='public' AND data_type='numeric' AND numeric_precision IS NOT NULL;
 ```
+
+Kiem tra bang chinh Moodle (chac chan nhat):
+
+```bash
+php admin/cli/check_database_schema.php
+```
+
+Ky vong: **khong con dong nao chua "size is (-1,65531)"**. Cac dong "Missing index"
+va sai lech ve default/NOT NULL tren bang tuy bien la dac diem san co cua database
+nguon, khong phai loi restore — xem muc "Kiem chung" trong README.md.
 
 Kiểm tra sequence — đây là thứ hay hỏng nhất sau khi restore. `last_value` phải
 **lớn hơn** `max(id)`, nếu không Moodle sẽ báo trùng khoá khi tạo bản ghi mới:

@@ -22,6 +22,8 @@ for k, v in [('DB', t['db']), ('USER', t['user']), ('PW', t['password'])]:
     print(f"{k}='{v}'")
 PY
 )"
+# Cho phep tro sang database khac (vd ban vua restore tu file dump de kiem tra).
+DB="${MDLTEST_DB:-$DB}"
 
 # config.php cua moodle-docker doc tu env va hardcode dbhost='db' — trung dung
 # ten service PostgreSQL trong docker-compose.yml nen chay thang tren network do.

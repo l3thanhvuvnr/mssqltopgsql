@@ -33,6 +33,8 @@ for k, v in [('DB', t['db']), ('USER', t['user']), ('PW', t['password'])]:
     print(f"{k}='{v}'")
 PY
 )"
+# Cho phep tro sang database khac (vd ban vua restore tu file dump de kiem tra).
+DB="${MDLTEST_DB:-$DB}"
 
 if [ ! -d "$WORK/moodledata" ]; then
   echo "Copy moodledata (mot lan, ~600MB)..."

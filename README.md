@@ -30,6 +30,7 @@ docker exec -it ptsc-pg18 psql -U moodle -d lms_ptsc # tu trong container
 ├── verify_deep.sh          # kiểm chứng độc lập sau khi migrate
 ├── check_moodle_schema.sh  # chạy check_database_schema.php của Moodle lên DB đích
 ├── fix_moodle_indexes.sh   # (tuỳ chọn) tạo các index Moodle mong đợi mà nguồn thiếu
+├── run_moodle_test.sh      # dựng một Moodle thật trỏ vào DB này để chạy thử
 ├── moodle-mssql2pg/        # tool: discover → generate → migrate → fix → verify → report
 │   └── Makefile            # lệnh phát triển tool (test, build, install)
 └── docs/superpowers/       # spec và plan thiết kế của tool
@@ -166,6 +167,48 @@ tuỳ biến và đều là chuẩn hoá có lợi, không phải mất mát:
   phải sửa thành `createdat`.
 - 10 cột `id` kiểu `integer` thành `bigint` (pgloader mở rộng cột identity). Moodle vốn
   định nghĩa `id` là bigint nên đây là hướng đúng.
+
+### Chạy thử site thật
+
+```bash
+./run_moodle_test.sh          # dung site test tai http://localhost:8899
+./run_moodle_test.sh stop     # dung va don dep
+```
+
+Dựng một container Moodle riêng, port riêng, dùng **bản copy** của `moodledata` — không
+đụng gì đến site đang chạy. Kết quả lần chạy gần nhất với source
+`/home/vulethanh/moodle-docker/src/ptsc/source` (Moodle 4.4+):
+
+- `/`, `/login/index.php`, `/admin/index.php`, `/course/index.php` đều **HTTP 200**.
+  Trang admin hiện đúng server checks: PostgreSQL 18.6 (yêu cầu ≥ 13), PHP 8.3.31
+  (yêu cầu ≥ 8.1).
+- 17 request, **không có PHP error nào** trong log Apache.
+- Đọc metadata và chạy điều kiện so sánh bằng trên **cả 729 bảng** qua lớp DML của
+  Moodle: 1143 cột `meta_type C` (char), 635 cột `X` (clob), **0 lỗi**.
+
+#### Site báo "An upgrade is pending" — không phải do migration
+
+`moodle_needs_upgrading()` so hash version của **toàn bộ plugin trên đĩa** với giá trị
+`allversionshash` lưu trong database:
+
+| | |
+|---|---|
+| `allversionshash` trong MSSQL nguồn | `eee2da0ee2c851a25fda5577fd93600d0516e7d6` |
+| `allversionshash` trong PostgreSQL | `eee2da0ee2c851a25fda5577fd93600d0516e7d6` — **giống hệt** |
+| hash tính từ source code | `989ac6a66b18d9bd7b95b448cacb5fb75f19dd2b` — **khác** |
+
+Nguyên nhân: source tree thiếu **14 plugin** mà database có cài — `mod_game`,
+`block_xp`, `block_quickmail`, `block_notifications`, `block_mycoursestatus`,
+`qtype_recordrtc`, `auth_oidc`, `factor_loginbanner`, `factor_secq`,
+`gradingform_checklist`, `theme_adaptable`, `local_chatbot`, `local_ctm`, `vnr_chatbot`.
+Chiều ngược lại là 0: không có plugin nào thừa code.
+
+Nói cách khác, `src/ptsc/source` **không phải codebase đang chạy LMS_PTSC**. Muốn site
+lên bình thường thì bổ sung 14 plugin đó vào source, hoặc dùng đúng codebase gốc.
+
+> `mdl_config.version` trong database là `2024042201.1` còn `version.php` là
+> `2024042201.10`. Đã đối chiếu: **MSSQL nguồn cũng là `2024042201.1`** (len=12) — bản
+> sao trung thực, không mất ký tự.
 
 ### Về các sai lệch mà `check_database_schema.php` còn báo
 
